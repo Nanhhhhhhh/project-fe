@@ -25,4 +25,8 @@ export const orderService = {
     const response = await axiosInstance.patch(`/orders/${id}/status`, { trang_thai_don_hang });
     return response.data;
   },
+  getStats: async (startDate?: string, endDate?: string) => {
+    const response = await axiosInstance.get('/orders/stats', { params: { startDate, endDate } });
+    return response.data;
+  },
 };

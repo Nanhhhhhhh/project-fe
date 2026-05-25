@@ -1,19 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Plus, Edit, Trash2, X, Eye } from 'lucide-react';
-
-const mockPromotions = [
-  { id: 1, name: 'Giảm giá mùa hè', code: 'SUMMER2026', discountType: 1, discountValue: 20, minOrder: 500000, startDate: '2026-06-01', endDate: '2026-08-31', status: 1, usageLimit: 100, usageCount: 25 },
-  { id: 2, name: 'Khuyến mãi cuối tuần', code: 'WEEKEND50', discountType: 2, discountValue: 50000, minOrder: 300000, startDate: '2026-04-01', endDate: '2026-04-30', status: 1, usageLimit: 50, usageCount: 45 },
-  { id: 3, name: 'Giảm giá tết', code: 'TET2026', discountType: 1, discountValue: 30, minOrder: 1000000, startDate: '2026-01-15', endDate: '2026-02-15', status: 0, usageLimit: 200, usageCount: 200 },
-];
+import { promotionService } from '../../../api/services/promotion.service';
 
 export default function ManagePromotions() {
-  const [promotions, setPromotions] = useState(mockPromotions);
+  const [promotions, setPromotions] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [editingPromotion, setEditingPromotion] = useState<any>(null);
   const [viewingPromotion, setViewingPromotion] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -26,6 +23,22 @@ export default function ManagePromotions() {
     usageLimit: 0,
     status: 1,
   });
+
+  const fetchPromotions = async () => {
+    setLoading(true);
+    try {
+      const data = await promotionService.getAll();
+      setPromotions(data);
+    } catch (error) {
+      console.error('Error fetching promotions', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPromotions();
+  }, []);
 
   const handleAdd = () => {
     setEditingPromotion(null);
@@ -46,44 +59,68 @@ export default function ManagePromotions() {
 
   const handleEdit = (promotion: any) => {
     setEditingPromotion(promotion);
+    const productInfo = promotion.danh_sach_san_pham?.[0] || {};
     setFormData({
-      name: promotion.name,
-      code: promotion.code,
-      description: promotion.description || '',
-      discountType: promotion.discountType,
-      discountValue: promotion.discountValue,
-      minOrder: promotion.minOrder,
-      startDate: promotion.startDate,
-      endDate: promotion.endDate,
-      usageLimit: promotion.usageLimit,
-      status: promotion.status,
+      name: promotion.ten_chuong_trinh,
+      code: promotion.ma_giam_gia,
+      description: promotion.mo_ta || '',
+      discountType: productInfo.loai_giam || 1,
+      discountValue: productInfo.gia_tri_giam || 0,
+      minOrder: productInfo.don_toi_thieu || 0,
+      startDate: promotion.ngay_bat_dau ? new Date(promotion.ngay_bat_dau).toISOString().split('T')[0] : '',
+      endDate: promotion.ngay_ket_thuc ? new Date(promotion.ngay_ket_thuc).toISOString().split('T')[0] : '',
+      usageLimit: productInfo.so_lan_dung_toi_da || 0,
+      status: promotion.trang_thai,
     });
     setShowModal(true);
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Bạn có chắc chắn muốn xóa khuyến mãi này?')) {
-      setPromotions(promotions.filter((p) => p.id !== id));
+      try {
+        await promotionService.remove(id);
+        fetchPromotions();
+      } catch (error) {
+        console.error('Error deleting promotion', error);
+      }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingPromotion) {
-      setPromotions(
-        promotions.map((p) =>
-          p.id === editingPromotion.id ? { ...p, ...formData, usageCount: p.usageCount } : p
-        )
-      );
-    } else {
-      setPromotions([...promotions, { id: promotions.length + 1, ...formData, usageCount: 0 }]);
+    const dto = {
+      ten_chuong_trinh: formData.name,
+      ma_giam_gia: formData.code,
+      mo_ta: formData.description,
+      ngay_bat_dau: formData.startDate,
+      ngay_ket_thuc: formData.endDate,
+      trang_thai: formData.status,
+      danh_sach_san_pham: [
+        {
+          loai_giam: formData.discountType,
+          gia_tri_giam: formData.discountValue,
+          don_toi_thieu: formData.minOrder,
+          so_lan_dung_toi_da: formData.usageLimit,
+        },
+      ],
+    };
+
+    try {
+      if (editingPromotion) {
+        await promotionService.update(editingPromotion._id, dto);
+      } else {
+        await promotionService.create(dto);
+      }
+      fetchPromotions();
+      setShowModal(false);
+    } catch (error) {
+      console.error('Error saving promotion', error);
     }
-    setShowModal(false);
   };
 
   const filteredPromotions = promotions.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.code.toLowerCase().includes(search.toLowerCase())
+    (p.ten_chuong_trinh || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.ma_giam_gia || '').toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -116,85 +153,93 @@ export default function ManagePromotions() {
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left py-3 px-4">Tên chương trình</th>
-                <th className="text-left py-3 px-4">Mã giảm giá</th>
-                <th className="text-left py-3 px-4">Loại giảm</th>
-                <th className="text-left py-3 px-4">Giá trị</th>
-                <th className="text-left py-3 px-4">Đơn tối thiểu</th>
-                <th className="text-left py-3 px-4">Thời gian</th>
-                <th className="text-left py-3 px-4">Đã dùng</th>
-                <th className="text-left py-3 px-4">Trạng thái</th>
-                <th className="text-left py-3 px-4">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPromotions.map((promotion) => (
-                <tr key={promotion.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4">{promotion.name}</td>
-                  <td className="py-3 px-4">
-                    <code className="bg-gray-100 px-2 py-1 rounded text-sm">{promotion.code}</code>
-                  </td>
-                  <td className="py-3 px-4">
-                    {promotion.discountType === 1 ? 'Giảm %' : 'Giảm tiền'}
-                  </td>
-                  <td className="py-3 px-4">
-                    {promotion.discountType === 1
-                      ? `${promotion.discountValue}%`
-                      : `${promotion.discountValue.toLocaleString()}đ`}
-                  </td>
-                  <td className="py-3 px-4">{promotion.minOrder.toLocaleString()}đ</td>
-                  <td className="py-3 px-4 text-sm">
-                    {promotion.startDate}<br />đến {promotion.endDate}
-                  </td>
-                  <td className="py-3 px-4">
-                    {promotion.usageCount}/{promotion.usageLimit}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`px-2 py-1 text-xs rounded ${
-                        promotion.status === 1
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {promotion.status === 1 ? 'Đang áp dụng' : 'Ngừng'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setViewingPromotion(promotion);
-                          setShowDetailModal(true);
-                        }}
-                        className="p-1 hover:bg-gray-200 rounded"
-                        title="Xem chi tiết"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(promotion)}
-                        className="p-1 hover:bg-gray-200 rounded"
-                        title="Sửa"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(promotion.id)}
-                        className="p-1 hover:bg-red-100 text-red-600 rounded"
-                        title="Xóa"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+          {loading ? (
+            <div className="p-8 text-center text-gray-500">Đang tải...</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left py-3 px-4">Tên chương trình</th>
+                  <th className="text-left py-3 px-4">Mã giảm giá</th>
+                  <th className="text-left py-3 px-4">Loại giảm</th>
+                  <th className="text-left py-3 px-4">Giá trị</th>
+                  <th className="text-left py-3 px-4">Đơn tối thiểu</th>
+                  <th className="text-left py-3 px-4">Thời gian</th>
+                  <th className="text-left py-3 px-4">Đã dùng</th>
+                  <th className="text-left py-3 px-4">Trạng thái</th>
+                  <th className="text-left py-3 px-4">Thao tác</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredPromotions.map((promotion) => {
+                  const productInfo = promotion.danh_sach_san_pham?.[0] || {};
+                  return (
+                    <tr key={promotion._id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-4">{promotion.ten_chuong_trinh}</td>
+                      <td className="py-3 px-4">
+                        <code className="bg-gray-100 px-2 py-1 rounded text-sm">{promotion.ma_giam_gia}</code>
+                      </td>
+                      <td className="py-3 px-4">
+                        {productInfo.loai_giam === 1 ? 'Giảm %' : 'Giảm tiền'}
+                      </td>
+                      <td className="py-3 px-4">
+                        {productInfo.loai_giam === 1
+                          ? `${productInfo.gia_tri_giam}%`
+                          : `${(productInfo.gia_tri_giam || 0).toLocaleString()}đ`}
+                      </td>
+                      <td className="py-3 px-4">{(productInfo.don_toi_thieu || 0).toLocaleString()}đ</td>
+                      <td className="py-3 px-4 text-sm">
+                        {promotion.ngay_bat_dau ? new Date(promotion.ngay_bat_dau).toLocaleDateString('vi-VN') : ''}<br />
+                        đến {promotion.ngay_ket_thuc ? new Date(promotion.ngay_ket_thuc).toLocaleDateString('vi-VN') : ''}
+                      </td>
+                      <td className="py-3 px-4">
+                        {productInfo.da_dung || 0}/{productInfo.so_lan_dung_toi_da || 0}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`px-2 py-1 text-xs rounded ${
+                            promotion.trang_thai === 1
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}
+                        >
+                          {promotion.trang_thai === 1 ? 'Đang áp dụng' : 'Ngừng'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setViewingPromotion(promotion);
+                              setShowDetailModal(true);
+                            }}
+                            className="p-1 hover:bg-gray-200 rounded"
+                            title="Xem chi tiết"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEdit(promotion)}
+                            className="p-1 hover:bg-gray-200 rounded"
+                            title="Sửa"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(promotion._id)}
+                            className="p-1 hover:bg-red-100 text-red-600 rounded"
+                            title="Xóa"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
@@ -352,68 +397,68 @@ export default function ManagePromotions() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Tên chương trình</p>
-                  <p className="font-medium">{viewingPromotion.name}</p>
+                  <p className="font-medium">{viewingPromotion.ten_chuong_trinh}</p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Mã giảm</p>
                   <p className="font-medium">
-                    <code className="bg-gray-100 px-2 py-1 rounded">{viewingPromotion.code}</code>
+                    <code className="bg-gray-100 px-2 py-1 rounded">{viewingPromotion.ma_giam_gia}</code>
                   </p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Loại giảm</p>
                   <p className="font-medium">
-                    {viewingPromotion.discountType === 1 ? 'Phần trăm (%)' : 'Tiền mặt (đ)'}
+                    {viewingPromotion.danh_sach_san_pham?.[0]?.loai_giam === 1 ? 'Phần trăm (%)' : 'Tiền mặt (đ)'}
                   </p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Giá trị giảm</p>
                   <p className="font-medium">
-                    {viewingPromotion.discountType === 1
-                      ? `${viewingPromotion.discountValue}%`
-                      : `${viewingPromotion.discountValue.toLocaleString()}đ`}
+                    {viewingPromotion.danh_sach_san_pham?.[0]?.loai_giam === 1
+                      ? `${viewingPromotion.danh_sach_san_pham?.[0]?.gia_tri_giam}%`
+                      : `${(viewingPromotion.danh_sach_san_pham?.[0]?.gia_tri_giam || 0).toLocaleString()}đ`}
                   </p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Giảm tối thiểu</p>
-                  <p className="font-medium">{viewingPromotion.minOrder.toLocaleString()}đ</p>
+                  <p className="font-medium">{(viewingPromotion.danh_sach_san_pham?.[0]?.don_toi_thieu || 0).toLocaleString()}đ</p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Số lần dùng tối đa</p>
                   <p className="font-medium">
-                    {viewingPromotion.usageLimit === 0 ? 'Không giới hạn' : viewingPromotion.usageLimit}
+                    {viewingPromotion.danh_sach_san_pham?.[0]?.so_lan_dung_toi_da === 0 ? 'Không giới hạn' : viewingPromotion.danh_sach_san_pham?.[0]?.so_lan_dung_toi_da}
                   </p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Ngày bắt đầu</p>
-                  <p className="font-medium">{new Date(viewingPromotion.startDate).toLocaleDateString('vi-VN')}</p>
+                  <p className="font-medium">{viewingPromotion.ngay_bat_dau ? new Date(viewingPromotion.ngay_bat_dau).toLocaleDateString('vi-VN') : ''}</p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Ngày kết thúc</p>
-                  <p className="font-medium">{new Date(viewingPromotion.endDate).toLocaleDateString('vi-VN')}</p>
+                  <p className="font-medium">{viewingPromotion.ngay_ket_thuc ? new Date(viewingPromotion.ngay_ket_thuc).toLocaleDateString('vi-VN') : ''}</p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded col-span-2">
                   <p className="text-sm text-gray-600 mb-1">Mô tả</p>
-                  <p className="font-medium">{viewingPromotion.description || 'Không có mô tả'}</p>
+                  <p className="font-medium">{viewingPromotion.mo_ta || 'Không có mô tả'}</p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Trạng thái</p>
                   <p>
                     <span
                       className={`px-2 py-1 text-xs rounded ${
-                        viewingPromotion.status === 1
+                        viewingPromotion.trang_thai === 1
                           ? 'bg-green-100 text-green-800'
                           : 'bg-gray-100 text-gray-800'
                       }`}
                     >
-                      {viewingPromotion.status === 1 ? 'Đang áp dụng' : 'Ngừng'}
+                      {viewingPromotion.trang_thai === 1 ? 'Đang áp dụng' : 'Ngừng'}
                     </span>
                   </p>
                 </div>
                 <div className="p-4 border border-gray-200 rounded">
                   <p className="text-sm text-gray-600 mb-1">Đã sử dụng</p>
                   <p className="font-medium">
-                    {viewingPromotion.usageCount} / {viewingPromotion.usageLimit === 0 ? '∞' : viewingPromotion.usageLimit}
+                    {viewingPromotion.danh_sach_san_pham?.[0]?.da_dung || 0} / {viewingPromotion.danh_sach_san_pham?.[0]?.so_lan_dung_toi_da === 0 ? '∞' : (viewingPromotion.danh_sach_san_pham?.[0]?.so_lan_dung_toi_da || 0)}
                   </p>
                 </div>
               </div>
